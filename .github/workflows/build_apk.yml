@@ -22,25 +22,42 @@ jobs:
           flutter-version: '3.19.0'
           cache: true
 
-      - name: Create Clean Flutter Project and Adjust SDK
+      - name: Create Project, Generate Icon, and Build APK
         run: |
           # 1. إنشاء المشروع المؤقت
-          flutter create temp_project --platforms=android --org com.scout.app
+          flutter create temp_project --platforms=android --org com.omelnour.scouts --project-name scout_app
           
-          # 2. نقل ملفات الكود الخاصة بنا
+          # 2. نقل ملفات الكود والأيقونة الخاصة بنا
           rm -rf temp_project/lib/*
           cp -r lib/* temp_project/lib/
           cp pubspec.yaml temp_project/pubspec.yaml
+          if [ -f "app_icon.png" ]; then
+            cp app_icon.png temp_project/app_icon.png
+          fi
           
-          # 3. تعديل ملف build.gradle لرفع minSdkVersion إلى 21 كما تطلب مكتبة فايربيس
-          GRADLE_FILE="temp_project/android/app/build.gradle"
+          # 3. الدخول للمشروع وتثبيت المكتبات
+          cd temp_project
+          flutter pub get
+
+          # 4. توليد الأيقونة المخصصة
+          flutter pub run flutter_launcher_icons
+
+          # 5. تعديل اسم التطبيق الظاهري في AndroidManifest.xml ليصبح Om ElNour Scouts
+          MANIFEST_FILE="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST_FILE" ]; then
+            sed -i 's/android:label="scout_app"/android:label="Om ElNour Scouts"/g' $MANIFEST_FILE
+            sed -i '/<application/a \    android:icon="@mipmap/launcher_icon"' $MANIFEST_FILE
+            # إضافة إذن الكاميرا
+            sed -i '/<manifest/a \    <uses-permission android:name="android.permission.CAMERA"/>' $MANIFEST_FILE
+          fi
+
+          # 6. تعديل ملف build.gradle لرفع minSdkVersion إلى 21
+          GRADLE_FILE="android/app/build.gradle"
           if [ -f "$GRADLE_FILE" ]; then
             sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' $GRADLE_FILE
           fi
 
-          # 4. بناء التطبيق
-          cd temp_project
-          flutter pub get
+          # 7. بناء ملف الـ APK النهائي
           flutter build apk --release
 
       - name: Upload APK Artifact
