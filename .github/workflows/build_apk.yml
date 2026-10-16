@@ -22,14 +22,19 @@ jobs:
           flutter-version: '3.19.0'
           cache: true
 
-      - name: Install Dependencies
+      - name: Create Clean Flutter Project and Inject Code
         run: |
-          if [ -d "scout_mobile_app" ]; then cd scout_mobile_app; fi
+          # 1. إنشاء مشروع فلاتر مؤقت نظيف وجاهز بكل ملفات الـ Android الداعمة
+          flutter create temp_project --platforms=android --org com.scout.app
+          
+          # 2. نقل ملفات الكود الخاصة بنا (lib و pubspec.yaml) إلى المشروع النظيف
+          rm -rf temp_project/lib/*
+          cp -r lib/* temp_project/lib/
+          cp pubspec.yaml temp_project/pubspec.yaml
+          
+          # 3. الدخول إلى المشروع النظيف لتنفيذ البناء
+          cd temp_project
           flutter pub get
-
-      - name: Build APK
-        run: |
-          if [ -d "scout_mobile_app" ]; then cd scout_mobile_app; fi
           flutter build apk --release
 
       - name: Upload APK Artifact
@@ -37,5 +42,5 @@ jobs:
         with:
           name: app-release
           path: |
+            **/temp_project/build/app/outputs/flutter-apk/app-release.apk
             build/app/outputs/flutter-apk/app-release.apk
-            **/build/app/outputs/flutter-apk/app-release.apk
