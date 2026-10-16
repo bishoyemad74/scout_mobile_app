@@ -39,7 +39,7 @@ jobs:
           cd temp_project
           flutter pub get
 
-          # 4. توليد الأيقونة المخصصة
+          # 4. توليد الأيقونة المخصصة للأندرويد فقط
           flutter pub run flutter_launcher_icons
 
           # 5. تعديل اسم التطبيق الظاهري في AndroidManifest.xml ليصبح Om ElNour Scouts
