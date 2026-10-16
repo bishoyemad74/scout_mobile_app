@@ -10,214 +10,156 @@ class QRScanPage extends StatefulWidget {
 }
 
 class _QRScanPageState extends State<QRScanPage> {
-  final MobileScannerController cameraController = MobileScannerController();
-  bool isScanning = true;
-  String? scannedCode;
-  String? memberName;
-  String? memberTeam;
-  bool isLoading = false;
-
+  final MobileScannerController controller = MobileScannerController();
   final DatabaseReference _dbRef = FirebaseDatabase.instance.ref();
+  
+  bool isProcessing = false;
+  String statusMessage = "وجّه الكاميرا نحو كود QR";
+  String lastScannedCode = "";
 
-  // فحص كود العضو فور التقاطه تلقائياً
-  void _onCodeDetected(BarcodeCapture capture) async {
-    if (!isScanning) return;
-
+  void _onDetect(BarcodeCapture capture) async {
     final List<Barcode> barcodes = capture.barcodes;
-    if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
-      final String code = barcodes.first.rawValue!.trim();
-      
-      setState(() {
-        isScanning = false; // إيقاف المسح مؤقتاً عند التقاط أول كود
-        scannedCode = code;
-        isLoading = true;
+    if (barcodes.isEmpty || isProcessing) return;
+
+    final String? code = barcodes.first.rawValue;
+    if (code == null || code == lastScannedCode) return;
+
+    setState(() {
+      isProcessing = true;
+      lastScannedCode = code;
+      statusMessage = "جاري البحث في بيانات الكشافة...";
+    });
+
+    try {
+      // 1. البحث عن الكشاف في داتا الكشافة
+      final memberSnapshot = await _dbRef.child("members").child(code).get();
+
+      String memberName = code;
+      if (memberSnapshot.exists && memberSnapshot.value != null) {
+        final data = Map<String, dynamic>.from(memberSnapshot.value as Map);
+        memberName = data['name'] ?? code;
+      }
+
+      // 2. تسجيل الحضور بتاريخ اليوم
+      final String today = DateTime.now().toIso8601String().split('T')[0];
+      final String timeNow = TimeOfDay.now().format(context);
+
+      await _dbRef.child("attendance").child(today).child(code).set({
+        "name": memberName,
+        "time": timeNow,
+        "timestamp": ServerValue.timestamp,
+        "status": "حاضر"
       });
 
-      // إيقاف الكاميرا مؤقتاً
-      await cameraController.stop();
-
-      // البحث عن بيانات الكشاف في Firebase
-      await _fetchMemberDetails(code);
-    }
-  }
-
-  Future<void> _fetchMemberDetails(String code) async {
-    try {
-      final snapshot = await _dbRef.child('members/$code').get();
-      if (snapshot.exists) {
-        final data = Map<String, dynamic>.from(snapshot.value as Map);
+      // 3. عرض إشعار النجاح بالاسم
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ تم تسجيل حضور: $memberName', style: const TextStyle(fontSize: 16)),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
         setState(() {
-          memberName = data['name'] ?? 'كشاف معروف';
-          memberTeam = data['team'] ?? 'الفريق الأول';
-          isLoading = false;
-        });
-      } else {
-        setState(() {
-          memberName = 'عضو جديد (الكود: $code)';
-          memberTeam = 'غير محدد';
-          isLoading = false;
+          statusMessage = "تم التسجيل: $memberName";
         });
       }
     } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تم المسح: $code (تعذر الربط بالسيرفر)'),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+
+    // انتظر ثانية ونصف قبل السماح بمسح الكود التالي
+    await Future.delayed(const Duration(milliseconds: 1500));
+    if (mounted) {
       setState(() {
-        memberName = 'كشاف (الكود: $code)';
-        memberTeam = 'غير محدد';
-        isLoading = false;
+        isProcessing = false;
       });
     }
-  }
-
-  // تسجيل الحضور بعد الضغط على زر التأكيد
-  Future<void> _confirmAttendance() async {
-    if (scannedCode == null) return;
-
-    final String todayDate = DateTime.now().toString().split(' ')[0];
-    final String timeNow = TimeOfDay.now().format(context);
-
-    await _dbRef.child('drafts/team_1/$scannedCode').set({
-      'code': scannedCode,
-      'name': memberName,
-      'team': memberTeam,
-      'time': timeNow,
-      'score': 10.0,
-      'date': todayDate,
-    });
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('🎉 تم تسجيل حضور الكشاف ($memberName) بنجاح!'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    }
-
-    _resetScanner();
-  }
-
-  // إعادة فتح الكاميرا لمسح كود جديد
-  void _resetScanner() async {
-    setState(() {
-      isScanning = true;
-      scannedCode = null;
-      memberName = null;
-      memberTeam = null;
-      isLoading = false;
-    });
-    await cameraController.start();
-  }
-
-  @override
-  void dispose() {
-    cameraController.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('كشافة أم النور ⚜️ - المسح التلقائي'),
+        title: const Text('Om ElNour Scouts - الحضور'),
         centerTitle: true,
-        backgroundColor: const Color(0xFF0D47A1),
-        foregroundColor: Colors.white,
-      ),
-      body: Column(
-        children: [
-          // منطقة الكاميرا الحية
-          Expanded(
-            flex: 3,
-            child: Stack(
-              children: [
-                MobileScanner(
-                  controller: cameraController,
-                  onDetect: _onCodeDetected,
-                ),
-                // إطار توجيه الـ QR
-                Center(
-                  child: Container(
-                    width: 250,
-                    height: 250,
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: isScanning ? Colors.green : Colors.yellow,
-                        width: 3,
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                ),
-              ],
+        actions: [
+          IconButton(
+            icon: ValueListenableBuilder(
+              valueListenable: controller.torchState,
+              builder: (context, state, child) {
+                return Icon(
+                  state == TorchState.on ? Icons.flash_on : Icons.flash_off,
+                );
+              },
             ),
+            onPressed: () => controller.toggleTorch(),
           ),
-
-          // منطقة النتيجة والتأكيد اليدوي
-          Expanded(
-            flex: 2,
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              width: double.infinity,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              child: isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : scannedCode == null
-                      ? const Center(
-                          child: Text(
-                            '📷 وجه الكاميرا نحو كود الـ QR وسيتم التثبيت والتأكيد تلقائياً',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 16, color: Colors.grey),
-                          ),
-                        )
-                      : Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              '👤 $memberName',
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF0D47A1),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '🏷️ الفريق: $memberTeam | الكود: $scannedCode',
-                              style: const TextStyle(fontSize: 15, color: Colors.black87),
-                            ),
-                            const SizedBox(height: 20),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    onPressed: _confirmAttendance,
-                                    icon: const Icon(Icons.check_circle),
-                                    label: const Text('✅ تأكيد وتسجيل الحضور'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 14),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                OutlinedButton(
-                                  onPressed: _resetScanner,
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                                  ),
-                                  child: const Text('إلغاء'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
+          IconButton(
+            icon: ValueListenableBuilder(
+              valueListenable: controller.cameraFacingState,
+              builder: (context, state, child) {
+                return const Icon(Icons.cameraswitch);
+              },
             ),
+            onPressed: () => controller.switchCamera(),
           ),
         ],
       ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: controller,
+            onDetect: _onDetect,
+          ),
+          // إطار تحديد الـ QR
+          Center(
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: isProcessing ? Colors.green : Colors.blue,
+                  width: 4,
+                ),
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+          // شريط معلومات الحضور في الأسفل
+          Positioned(
+            bottom: 30,
+            left: 20,
+            right: 20,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.black87,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                statusMessage,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          )
+        ],
+      ),
     );
+  }
+
+  @override
+  Widget buildDispose() {
+    controller.dispose();
+    super.dispose();
   }
 }
