@@ -24,7 +24,7 @@ jobs:
 
       - name: Create Project, Generate Icon, and Build APK
         run: |
-          # 1. إنشاء المشروع المؤقت
+          # 1. إنشاء المشروع المؤقت بالاسم والمواصفات الصحيحة
           flutter create temp_project --platforms=android --org com.omelnour.scouts --project-name scout_app
           
           # 2. نقل ملفات الكود والأيقونة الخاصة بنا
@@ -39,25 +39,16 @@ jobs:
           cd temp_project
           flutter pub get
 
-          # 4. توليد الأيقونة المخصصة للأندرويد فقط
+          # 4. توليد الأيقونة المخصصة للأندرويد تلقائياً وبأمان
           flutter pub run flutter_launcher_icons
 
-          # 5. تعديل اسم التطبيق الظاهري في AndroidManifest.xml ليصبح Om ElNour Scouts
-          MANIFEST_FILE="android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST_FILE" ]; then
-            sed -i 's/android:label="scout_app"/android:label="Om ElNour Scouts"/g' $MANIFEST_FILE
-            sed -i '/<application/a \    android:icon="@mipmap/launcher_icon"' $MANIFEST_FILE
-            # إضافة إذن الكاميرا
-            sed -i '/<manifest/a \    <uses-permission android:name="android.permission.CAMERA"/>' $MANIFEST_FILE
-          fi
-
-          # 6. تعديل ملف build.gradle لرفع minSdkVersion إلى 21
+          # 5. تعديل ملف build.gradle فقط لرفع minSdkVersion إلى 21 (بدون التلاعب اليدوي بالـ Manifest)
           GRADLE_FILE="android/app/build.gradle"
           if [ -f "$GRADLE_FILE" ]; then
             sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' $GRADLE_FILE
           fi
 
-          # 7. بناء ملف الـ APK النهائي
+          # 6. بناء ملف الـ APK النهائي
           flutter build apk --release
 
       - name: Upload APK Artifact
